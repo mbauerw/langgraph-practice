@@ -7,6 +7,8 @@ from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode
 from IPython.display import Image, display
 from langgraph.graph import START, StateGraph
+from langgraph.checkpoint.memory import MemorySaver
+
 
 load_dotenv()
 
@@ -20,15 +22,27 @@ os.environ["LANGSMITH_TRACING"] = "true"
 os.environ["LANGSMITH_PROJECT"] = "langchain-academy"
 
 def multiply(a: int, b: int) -> int:
-  """Multiply two numbers together."""
+  """Multiply a and b.
+  
+    Args:
+        a (int): The first number.
+        b (int): The second number."""
   return a * b
 
 def add(a: int, b: int) -> int:
-  """Add two numbers together."""
+  """Add a and b.
+  
+    Args:
+        a (int): The first number.
+        b (int): The second number."""
   return a + b
 
 def divide(a: int, b: int) -> float:
-  """Divide the first number by the second number."""
+  """Divide a and b.
+  
+    Args:
+        a (int): The first number.
+        b (int): The second number."""
   return a / b
 
 tools = [add, multiply, divide]
@@ -36,11 +50,12 @@ llm = ChatOpenAI(model="gpt-4o")
 
 llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
 
-# sys-message
-sys_msg = SystemMessage(content="You are a helpful assistant professor tasted with performing arithmetic on a set of inputs.")
 
+sys_msg = SystemMessage("You are a helpful assistant who provides accurate and pertinant information when prompted")
+
+# Node
 def assistant(state: MessagesState):
-  return {"messages": [llm_with_tools.invoke([sys_msg] + state["messages"])]}
+    return {"messages": [llm_with_tools.invoke([sys_msg] + state["messages"])]}
 
 builder = StateGraph(MessagesState)
 
@@ -48,17 +63,26 @@ builder.add_node("assistant", assistant)
 builder.add_node("tools", ToolNode(tools))
 
 builder.add_edge(START, "assistant")
-builder.add_conditional_edges(
-  "assistant",
-  tools_condition
-)
+builder.add_conditional_edges("assistant", tools_condition)
 builder.add_edge("tools", "assistant")
-react_graph = builder.compile()
 
-display(Image(react_graph.get_graph(xray=True).draw_mermaid_png()))
+# Memory
+memory = MemorySaver()
+react_graph_memory = builder.compile(checkpointer=memory)
 
-messages = [HumanMessage(content="Add 3 and 4. Multiply the output by 2. Divide the output by 5")]
-messages = react_graph.invoke({"messages": messages})
+config = {"configurable": {"thread_id": "1"}}
 
+messages = [HumanMessage(content="Add 3 and 4. Multiply output by 4. Divide output by 2")]
+
+# Run
+messages = react_graph_memory.invoke({"messages": messages},config)
 for m in messages['messages']:
-    m.pretty_print()
+  m.pretty_print()
+
+messages = [HumanMessage(content="Multiply that by 2.")]
+print(messages)
+
+messages = react_graph_memory.invoke({"messages": messages}, config)
+for m in messages['messages']:
+  m.pretty_print()
+
